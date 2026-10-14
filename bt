@@ -17,7 +17,13 @@ if [[ -z "${FIREFOX:-}" ]]; then
 fi
 
 die() { echo "error: $*" >&2; exit 1; }
-compose() { docker compose --project-directory "$ROOT" -f "$ROOT/compose.yaml" "$@"; }
+# First IPv4 address from the config's `DNS =` line (gluetun ignores that line itself).
+wg_dns() {
+  [[ -f "$WG_CONF" ]] || return 0
+  sed -nE 's/^[[:space:]]*DNS[[:space:]]*=[[:space:]]*//p' "$WG_CONF" | tr ',' '\n' | tr -d ' \t\r' |
+    grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -1 || true
+}
+compose() { WG_DNS="${WG_DNS:-127.0.0.1}" docker compose --project-directory "$ROOT" -f "$ROOT/compose.yaml" "$@"; }
 
 check_conf() {
   # Must exist before `compose up`, or Docker creates a directory at the mount path.
@@ -28,6 +34,9 @@ check_conf() {
   if [[ "$mode" != "600" ]]; then
     chmod 600 "$WG_CONF" && echo "fixed: chmod 600 wg0.conf (contains your private key)"
   fi
+  WG_DNS="$(wg_dns)"
+  [[ -n "$WG_DNS" ]] || die "no IPv4 DNS server in $WG_CONF (expected e.g. 'DNS = 10.2.0.1')"
+  export WG_DNS
   if git -C "$ROOT" ls-files --error-unmatch wg0.conf >/dev/null 2>&1; then
     die "wg0.conf is tracked by git; remove it (git rm --cached wg0.conf) and rotate the key"
   fi

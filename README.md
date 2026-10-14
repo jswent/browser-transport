@@ -32,7 +32,7 @@ Always start through `./bt`. It checks the config and refuses to launch Firefox 
 | Private key exposure | `wg0.conf` is gitignored, forced to `chmod 600` and mounted read-only. `bt` aborts if git tracks it. |
 | Proxy reachable by other machines | The port is published on `127.0.0.1` only, never `0.0.0.0`. |
 | VPN drops and traffic leaks | gluetun's firewall acts as a kill switch and only allows traffic through the tunnel. Firefox has `failover_direct=false`, so it fails closed when the proxy is down. |
-| DNS leaks | Firefox sends hostnames to the proxy (HTTP CONNECT) and never resolves them locally. DoH and DNS prefetch are disabled. gluetun resolves names over DoT inside the tunnel. |
+| DNS leaks | Firefox sends hostnames to the proxy (HTTP CONNECT) and never resolves them locally. DoH and DNS prefetch are disabled. gluetun resolves names using the `DNS =` server from `wg0.conf` (Proton: `10.2.0.1`). That server is reachable only inside the tunnel, so no third-party resolver is involved. |
 | WebRTC / QUIC (UDP) bypassing the proxy | HTTP/3 is disabled. WebRTC is limited to proxy-only and doesn't expose host IPs. |
 | Mixing with your normal browsing | A separate profile in `./profile` and `-no-remote` keep it apart from your main Firefox: no shared cookies or sessions, and links aren't handed to the unproxied instance. |
 | Supply chain | The gluetun image is pinned by tag and digest. Container runs with `no-new-privileges`, and it has only `NET_ADMIN`. |
@@ -45,7 +45,7 @@ The prefs are in `firefox/user.js`. They're re-applied on every launch, so chang
 - **This is not anonymity.** The browser fingerprint, time zone, locale, and any accounts you log into still identify you. For stronger anonymity use Tor Browser. Setting `privacy.resistFingerprinting` helps somewhat but breaks some sites.
 - Any local process can use the loopback proxy. If that matters, set `HTTPPROXY_USER` and `HTTPPROXY_PASSWORD`. Firefox will then ask for the credentials.
 - Your VPN provider can see your traffic metadata, just as with any VPN.
-- **DNS options.** By default, gluetun sends DNS to Cloudflare over DoT, through the tunnel. To use Proton's resolver instead, uncomment the `DNS_UPSTREAM_*` lines in `compose.yaml`. That adds no third party, but the DNS traffic is plaintext inside the tunnel.
+- DNS to Proton is plain UDP, but it is encrypted by the WireGuard tunnel. gluetun's resolver is configured through environment variables, not the config's `DNS =` line, so `bt` reads that line and passes it to gluetun. For that reason, run compose through `./bt`. Running it directly fails on purpose.
 
 ## Updating gluetun
 

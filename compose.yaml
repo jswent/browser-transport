@@ -22,8 +22,8 @@ services:
       HTTPPROXY: "on"
       HTTPPROXY_STEALTH: "on" # don't add Via / X-Forwarded-For headers
       HTTPPROXY_LOG: "off" # don't log browsing destinations
-      # DNS is resolved inside the container and sent over the tunnel (gluetun
-      # default: DNS-over-TLS to Cloudflare). To use Proton's in-tunnel resolver instead:
-      # DNS_UPSTREAM_RESOLVER_TYPE: plain
-      # DNS_UPSTREAM_PLAIN_ADDRESSES: 10.2.0.1:53
+      # DNS: plain DNS to the resolver from wg0.conf's `DNS =` line (Proton: 10.2.0.1),
+      # reachable only inside the tunnel. WG_DNS is parsed and exported by ./bt.
+      DNS_UPSTREAM_RESOLVER_TYPE: plain
+      DNS_UPSTREAM_PLAIN_ADDRESSES: ${WG_DNS:?start via ./bt}:53
     restart: unless-stopped
