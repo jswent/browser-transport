@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# browser-transport: run a dedicated Firefox through gluetun (WireGuard) via a loopback HTTP proxy.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WG_CONF="$ROOT/wg0.conf"
+PROFILE="$ROOT/profile"
+PROXY="http://127.0.0.1:8888"
+CHECK_URL="https://api.ipify.org"
+
+if [[ -z "${FIREFOX:-}" ]]; then
+  for c in "/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox" \
+           "/Applications/Firefox.app/Contents/MacOS/firefox" \
+           firefox-developer-edition firefox; do
+    if [[ -x "$c" ]] || command -v "$c" >/dev/null 2>&1; then FIREFOX="$c"; break; fi
+  done
+fi
+
+die() { echo "error: $*" >&2; exit 1; }
+compose() { docker compose --project-directory "$ROOT" -f "$ROOT/compose.yaml" "$@"; }
+
+check_conf() {
+  # Must exist before `compose up`, or Docker creates a directory at the mount path.
+  [[ -f "$WG_CONF" ]] || die "missing $WG_CONF (paste your WireGuard config there)"
+  grep -q '^\[Interface\]' "$WG_CONF" || die "$WG_CONF doesn't look like a WireGuard config"
+  local mode
+  if [[ "$(uname)" == Darwin ]]; then mode="$(stat -f '%Lp' "$WG_CONF")"; else mode="$(stat -c '%a' "$WG_CONF")"; fi
+  if [[ "$mode" != "600" ]]; then
+    chmod 600 "$WG_CONF" && echo "fixed: chmod 600 wg0.conf (contains your private key)"
+  fi
+  if git -C "$ROOT" ls-files --error-unmatch wg0.conf >/dev/null 2>&1; then
+    die "wg0.conf is tracked by git; remove it (git rm --cached wg0.conf) and rotate the key"
+  fi
+}
+
+up() {
+  check_conf
+  compose up -d --wait --wait-timeout 90 || { compose logs --tail 40; die "gluetun failed to become healthy"; }
+}
+
+verify() {
+  local direct vpn
+  vpn="$(curl -fsS --max-time 15 --proxy "$PROXY" "$CHECK_URL")" || die "no connectivity through proxy"
+  direct="$(curl -fsS --max-time 10 "$CHECK_URL" || true)"
+  [[ -n "$vpn" && "$vpn" != "$direct" ]] || die "proxy egress IP ($vpn) matches direct IP; refusing"
+  echo "ok: egress IP $vpn (direct: ${direct:-unknown})"
+}
+
+launch() {
+  [[ -n "${FIREFOX:-}" ]] || die "Firefox not found; set FIREFOX=/path/to/firefox"
+  mkdir -p "$PROFILE" && chmod 700 "$PROFILE"
+  cp "$ROOT/firefox/user.js" "$PROFILE/user.js"
+  # -no-remote: separate instance, never hands the URL to your normal (unproxied) Firefox.
+  nohup "$FIREFOX" -profile "$PROFILE" -no-remote "$@" >/dev/null 2>&1 &
+  disown
+}
+
+case "${1:-start}" in
+  start)  shift || true; up; verify; launch "$@" ;;
+  up)     up; verify ;;
+  check)  verify ;;
+  down)   compose down ;;
+  status) compose ps ;;
+  logs)   compose logs -f ;;
+  *) echo "usage: $(basename "$0") [start [urls...]|up|check|down|status|logs]" >&2; exit 2 ;;
+esac
