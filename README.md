@@ -20,8 +20,12 @@ Firefox (dedicated profile) ──HTTP proxy──▶ 127.0.0.1:8888 ──▶ g
 ./bt              # start gluetun, verify the egress IP, launch Firefox
 ./bt start <url>  # same, and open a URL
 ./bt check        # compare the proxy's egress IP with your direct IP
-./bt status | logs | down
+./bt stop         # close the browser, leave the tunnel up
+./bt down         # close the browser, then stop gluetun
+./bt status | logs
 ```
+
+`bt` finds the browser by its `-profile` path, so it only stops this instance and never touches your normal Firefox. `down` closes the browser before stopping the tunnel. The browser gets 10 seconds to shut down cleanly before it is force-killed. Your profile data (cookies, history) is kept between runs.
 
 Always start through `./bt`. It checks the config and refuses to launch Firefox if the proxy's egress IP matches your real one.
 

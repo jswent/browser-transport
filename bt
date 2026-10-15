@@ -55,21 +55,55 @@ verify() {
   echo "ok: egress IP $vpn (direct: ${direct:-unknown})"
 }
 
+# PIDs of the Firefox instance(s) running our profile (by command line, so it
+# survives Firefox restarting itself; content child processes are skipped).
+browser_pids() {
+  local pid cmd
+  while read -r pid cmd; do
+    [[ "$cmd" == *"-contentproc"* ]] && continue
+    case "$cmd " in *" -profile $PROFILE "*) echo "$pid" ;; esac
+  done < <(ps -axo pid=,command=)
+}
+
 launch() {
   [[ -n "${FIREFOX:-}" ]] || die "Firefox not found; set FIREFOX=/path/to/firefox"
+  if [[ -n "$(browser_pids)" ]]; then echo "browser already running"; return; fi
   mkdir -p "$PROFILE" && chmod 700 "$PROFILE"
   cp "$ROOT/firefox/user.js" "$PROFILE/user.js"
   # -no-remote: separate instance, never hands the URL to your normal (unproxied) Firefox.
   nohup "$FIREFOX" -profile "$PROFILE" -no-remote "$@" >/dev/null 2>&1 &
   disown
+  echo "browser launched"
+}
+
+stop_browser() {
+  local pids i
+  pids="$(browser_pids)"
+  [[ -n "$pids" ]] || return 0
+  kill -TERM $pids 2>/dev/null || true
+  for i in {1..20}; do
+    [[ -z "$(browser_pids)" ]] && { echo "browser stopped"; return; }
+    sleep 0.5
+  done
+  pids="$(browser_pids)"
+  [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null || true
+  echo "browser killed"
+}
+
+status() {
+  local pids
+  pids="$(browser_pids)"
+  if [[ -n "$pids" ]]; then echo "browser: running (pid $(echo $pids))"; else echo "browser: stopped"; fi
+  compose ps
 }
 
 case "${1:-start}" in
   start)  shift || true; up; verify; launch "$@" ;;
   up)     up; verify ;;
   check)  verify ;;
-  down)   compose down ;;
-  status) compose ps ;;
+  down)   stop_browser; compose down ;;  # browser first, so it never outlives the tunnel
+  stop)   stop_browser ;;
+  status) status ;;
   logs)   compose logs -f ;;
-  *) echo "usage: $(basename "$0") [start [urls...]|up|check|down|status|logs]" >&2; exit 2 ;;
+  *) echo "usage: $(basename "$0") [start [urls...]|up|check|stop|down|status|logs]" >&2; exit 2 ;;
 esac
